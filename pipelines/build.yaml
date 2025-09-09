@@ -53,23 +53,27 @@ stages:
         }
       displayName: "Detect Maven (mvnw vs mvn)"
 
+    # Detecta y expone JAVA_HOME_17_X64 para este pipeline
+    - bash: |
+        set -e
+        echo "##vso[task.setvariable variable=JAVA_HOME_17_X64]$(/usr/libexec/java_home -v 17)"
+        echo "JAVA_HOME_17_X64 set to: $(/usr/libexec/java_home -v 17)"
+      displayName: Set JAVA_HOME_17_X64
+
     # Build + Tests con reporte JUnit. Forzamos el repo local para que se cachee.
     - task: Maven@3
-      displayName: "mvn clean verify"
+      displayName: mvn clean verify
       inputs:
         mavenPomFile: 'pom.xml'
         goals: 'clean verify'
-        options: '-Dmaven.repo.local=$(MAVEN_LOCAL_REPO) -U'
+        options: '-Dmaven.repo.local=$(Pipeline.Workspace)/.m2/repository -U'
         publishJUnitResults: true
         testResultsFiles: '**/surefire-reports/TEST-*.xml'
-        codeCoverageToolOption: 'None'   # cambia a JaCoCo si ya lo tienes configurado
-        mavenOptions: '-Xmx1g -DskipTests=false'
-        javaHomeOption: 'JDKVersion'
-        jdkVersionOption: '$(JDK_VERSION)'  # requiere JDK preinstalado en el agente
+        javaHomeOption: 'JDKVersion'          # <- usa JAVA_HOME_17_X64
+        jdkVersionOption: '1.17'
         jdkArchitectureOption: 'x64'
-        # Si NO usas mvnw y necesitas forzar la ruta de mvn:
         mavenVersionOption: 'Path'
-        mavenDirectory: '/usr/local/Cellar/maven/3.9.11'
+        mavenDirectory: '/usr/local/opt/maven/libexec'   # tu Maven de brew (Intel)
 
     # Publica artefactos generados (ajusta patrón si empaquetas WAR/EAR)
     - task: PublishBuildArtifacts@1
