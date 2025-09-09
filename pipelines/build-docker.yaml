@@ -5,7 +5,7 @@ trigger:
   branches: { include: [ main, task/* ] }
 
 pool:
-  name: Local-ENV   # agente con Docker (no requiere Maven/Java)
+  name: Local-ENV   # agente con Docker
 
 stages:
 - stage: Build
@@ -13,7 +13,8 @@ stages:
   - job: build_in_node_container
     displayName: Build in Node container (install JDK+Maven)
     container:
-      image: node:20-bookworm   # tiene node/npm; ADO lo mantiene vivo con node -e ...
+      image: node:20-bookworm
+      options: '--user 0'       # 👈 ejecuta como root para apt-get
     variables:
       MAVEN_LOCAL_REPO: '/root/.m2/repository'
 
@@ -21,12 +22,15 @@ stages:
     - checkout: self
       clean: true
 
-    # Instalar JDK 17 + Maven dentro del contenedor (Debian/Bookworm)
+    # Verifica usuario efectivo (debe ser uid=0)
+    - bash: id -u && whoami
+      displayName: "Check user (should be root)"
+
+    # Instalar JDK 17 + Maven dentro del contenedor
     - bash: |
         set -euo pipefail
         apt-get update
         apt-get install -y --no-install-recommends openjdk-17-jdk-headless maven ca-certificates
-        # JAVA_HOME dinámico
         export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(which java)")")")"
         echo "JAVA_HOME=$JAVA_HOME"
         java -version
@@ -43,7 +47,6 @@ stages:
 
     - bash: |
         set -euo pipefail
-        # Asegura JAVA_HOME en cada paso que ejecute Maven
         export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(which java)")")")"
         export PATH="$JAVA_HOME/bin:$PATH"
         mvn -Dmaven.repo.local="$(MAVEN_LOCAL_REPO)" -U -B -e clean verify
@@ -51,7 +54,7 @@ stages:
       env:
         MAVEN_OPTS: "-Xmx1g"
 
-    # Diagnóstico (por si los reports no están en la ruta clásica)
+    # (Opcional) Diagnóstico de reports
     - bash: |
         set +e
         echo "Total TEST-*.xml:"
