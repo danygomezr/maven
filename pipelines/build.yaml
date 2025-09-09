@@ -84,15 +84,30 @@ stages:
       env:
         MAVEN_OPTS: "-Xmx1g"
 
-    # Publicar resultados JUnit (Surefire + Failsafe), SIEMPRE (aunque falle mvn)
+    # Diagnóstico: contar y listar algunos XML de tests
+    - bash: |
+        set +e
+        echo "Buscando XML de JUnit desde: $(System.DefaultWorkingDirectory)"
+        cd "$(System.DefaultWorkingDirectory)"
+        echo "Total TEST-*.xml encontrados:"
+        find . -type f -name "TEST-*.xml" | wc -l || true
+        echo "Ejemplos:"
+        find . -type f -name "TEST-*.xml" | head -n 20 || true
+      displayName: "Diagnóstico: localizar reportes JUnit"
+      condition: always()
+
+    # Publicar resultados (Surefire + Failsafe + cualquier carpeta)
     - task: PublishTestResults@2
       displayName: "Publish JUnit (Surefire + Failsafe)"
       condition: always()
       inputs:
         testResultsFormat: 'JUnit'
+        searchFolder: '$(System.DefaultWorkingDirectory)'
         testResultsFiles: |
+          **/TEST-*.xml
           **/surefire-reports/TEST-*.xml
           **/failsafe-reports/TEST-*.xml
+        mergeTestResults: true
         failTaskOnFailedTests: false
 
     # Copiar JARs generados al staging (soporta globs y exclusiones)
