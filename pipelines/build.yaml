@@ -2,17 +2,15 @@
 name: $(Date:yyyyMMdd)$(Rev:.r)
 
 trigger:
-  branches: { include: [ main, task/*] }
+  branches: { include: [ main, task/* ] }
 
 pool:
-  name: Local-ENV
+  name: Local-ENV   # agente self-hosted macOS
 
 variables:
-  # Ajusta si necesitas otra versión de JDK preinstalada en tu agente
+  # JDK requerido por el build
   JDK_VERSION: '1.17'
-  # Si NO usas mvnw y tienes Maven instalado localmente, define la ruta:
-  MAVEN_PATH: '/usr/local/bin/mvn'   # ej. Linux
-  # Repositorio Maven cacheado en el workspace para usar con Cache@2
+  # Repositorio Maven cacheado en el workspace (más predecible que ~/.m2 en self-hosted)
   MAVEN_LOCAL_REPO: '$(Pipeline.Workspace)/.m2/repository'
 
 stages:
@@ -25,16 +23,7 @@ stages:
     - checkout: self
       clean: true
 
-    # (Opcional) Si tu agente ya tiene JDK 17, este paso puede omitirse.
-    # El task Maven@3 también puede gestionar jdkVersionOption abajo.
-    #- task: JavaToolInstaller@0
-    #  displayName: "Ensure JDK $(JDK_VERSION)"
-    #  inputs:
-    #    versionSpec: '17'
-    #    jdkArchitectureOption: 'x64'
-    #    jdkSourceOption: 'PreInstalled'
-
-    # Cache del repositorio local de Maven (acelera builds limpios/repetidos)
+    # Cache del repositorio local de Maven
     - task: Cache@2
       displayName: "Cache Maven local repo"
       inputs:
@@ -42,42 +31,74 @@ stages:
         restoreKeys: 'maven | "$(Agent.OS)"'
         path: '$(MAVEN_LOCAL_REPO)'
 
-    # Si existe mvnw se usa; si no, se usa Maven instalado en el agente (MAVEN_PATH).
-    - powershell: |
-        if (Test-Path ".\mvnw") {
-          Write-Host "Using Maven Wrapper (mvnw)"
+    # Detectar mvnw vs mvn con BASH (no pwsh)
+    - bash: |
+        set -euo pipefail
+        if [ -x "./mvnw" ]; then
+          echo "Using Maven Wrapper (./mvnw)"
           ./mvnw -v
-        } else {
-          Write-Host "Using Maven at $(MAVEN_PATH)"
-          & "$(MAVEN_PATH)" -v
-        }
+          echo "wrapper=true" >> $(Pipeline.Workspace)/mvn.props
+        else
+          echo "Using system Maven (mvn)"
+          command -v mvn || { echo "mvn no está en PATH"; exit 1; }
+          mvn -v
+          echo "wrapper=false" >> $(Pipeline.Workspace)/mvn.props
+        fi
       displayName: "Detect Maven (mvnw vs mvn)"
 
-    # Detecta y expone JAVA_HOME_17_X64 para este pipeline
+    # Exponer JAVA_HOME_17_X64 (lo requiere Maven@3 con JDKVersion)
     - bash: |
         set -e
-        echo "##vso[task.setvariable variable=JAVA_HOME_17_X64]$(/usr/libexec/java_home -v 17)"
-        echo "JAVA_HOME_17_X64 set to: $(/usr/libexec/java_home -v 17)"
-      displayName: Set JAVA_HOME_17_X64
+        JH=$(/usr/libexec/java_home -v 17)
+        echo "JAVA_HOME_17_X64=$JH"
+        echo "##vso[task.setvariable variable=JAVA_HOME_17_X64]$JH"
+      displayName: "Set JAVA_HOME_17_X64"
 
-    # Build + Tests con reporte JUnit. Forzamos el repo local para que se cachee.
+    # Build + Tests (si hay mvnw preferimos wrapper; si no, usamos Maven@3)
+    # Caso 1: usar Maven@3 con el Maven de Homebrew (robusto, publica JUnit automáticamente)
     - task: Maven@3
-      displayName: mvn clean verify
+      displayName: "mvn clean verify (Maven@3)"
+      condition: and(succeeded(), eq(variables['wrapper'], 'false'))
       inputs:
         mavenPomFile: 'pom.xml'
         goals: 'clean verify'
-        options: '-Dmaven.repo.local=$(Pipeline.Workspace)/.m2/repository -U'
+        options: '-Dmaven.repo.local=$(MAVEN_LOCAL_REPO) -U'
         publishJUnitResults: true
         testResultsFiles: '**/surefire-reports/TEST-*.xml'
-        javaHomeOption: 'JDKVersion'          # <- usa JAVA_HOME_17_X64
-        jdkVersionOption: '1.17'
+        javaHomeOption: 'JDKVersion'      # usa JAVA_HOME_17_X64
+        jdkVersionOption: '$(JDK_VERSION)'
         jdkArchitectureOption: 'x64'
         mavenVersionOption: 'Path'
-        mavenDirectory: '/usr/local/opt/maven/libexec'   # tu Maven de brew (Intel)
+        mavenDirectory: '/usr/local/opt/maven/libexec'  # mac Intel (Homebrew)
 
-    # Publica artefactos generados (ajusta patrón si empaquetas WAR/EAR)
+    # Caso 2: si existe mvnw, invocarlo directamente (evita "demands" del task)
+    - bash: |
+        set -euo pipefail
+        chmod +x ./mvnw
+        export JAVA_HOME="$JAVA_HOME_17_X64"
+        export PATH="$JAVA_HOME/bin:$PATH"
+        java -version
+        ./mvnw -Dmaven.repo.local="$(MAVEN_LOCAL_REPO)" -U -B -e clean verify
+      displayName: "mvnw clean verify"
+      condition: and(succeeded(), eq(variables['wrapper'], 'true'))
+      env:
+        MAVEN_OPTS: "-Xmx1g"
+
+    # Publicar resultados JUnit (Surefire + Failsafe), SIEMPRE (aunque falle mvn)
+    - task: PublishTestResults@2
+      displayName: "Publish JUnit (Surefire + Failsafe)"
+      condition: always()
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: |
+          **/surefire-reports/TEST-*.xml
+          **/failsafe-reports/TEST-*.xml
+        failTaskOnFailedTests: false
+
+    # Publicar artefactos generados
     - task: PublishBuildArtifacts@1
       displayName: "Publish artifact(s)"
+      condition: succeeded()
       inputs:
         pathToPublish: '$(System.DefaultWorkingDirectory)/**/target/*.jar'
         artifactName: 'maven-drop'
