@@ -2,7 +2,7 @@
 name: $(Date:yyyyMMdd)$(Rev:.r)
 
 trigger:
-  branches: { include: [ main, task/* ] }
+  branches: { include: [ main] }
 
 pool:
   name: Local-ENV   # agente self-hosted macOS
