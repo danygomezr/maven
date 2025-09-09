@@ -1,0 +1,81 @@
+# .azure-pipelines/pipelines/maven-build.yml
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches: { include: [ main, develop ] }
+  paths:    { include: [ pom.xml, **/*.java, .azure-pipelines/** ] }
+
+pool:
+  name: Local-ENV   # <- tu agente self-hosted
+
+variables:
+  # Ajusta si necesitas otra versión de JDK preinstalada en tu agente
+  JDK_VERSION: '1.17'
+  # Si NO usas mvnw y tienes Maven instalado localmente, define la ruta:
+  MAVEN_PATH: '/usr/share/maven/bin/mvn'   # ej. Linux
+  # Repositorio Maven cacheado en el workspace para usar con Cache@2
+  MAVEN_LOCAL_REPO: '$(Pipeline.Workspace)/.m2/repository'
+
+stages:
+- stage: Build
+  displayName: "Build & Unit Tests (Maven)"
+  jobs:
+  - job: maven_build
+    displayName: "Compile, Test, Package"
+    steps:
+    - checkout: self
+      clean: true
+
+    # (Opcional) Si tu agente ya tiene JDK 17, este paso puede omitirse.
+    # El task Maven@3 también puede gestionar jdkVersionOption abajo.
+    #- task: JavaToolInstaller@0
+    #  displayName: "Ensure JDK $(JDK_VERSION)"
+    #  inputs:
+    #    versionSpec: '17'
+    #    jdkArchitectureOption: 'x64'
+    #    jdkSourceOption: 'PreInstalled'
+
+    # Cache del repositorio local de Maven (acelera builds limpios/repetidos)
+    - task: Cache@2
+      displayName: "Cache Maven local repo"
+      inputs:
+        key: 'maven | "$(Agent.OS)" | **/pom.xml'
+        restoreKeys: 'maven | "$(Agent.OS)"'
+        path: '$(MAVEN_LOCAL_REPO)'
+
+    # Si existe mvnw se usa; si no, se usa Maven instalado en el agente (MAVEN_PATH).
+    - powershell: |
+        if (Test-Path ".\mvnw") {
+          Write-Host "Using Maven Wrapper (mvnw)"
+          ./mvnw -v
+        } else {
+          Write-Host "Using Maven at $(MAVEN_PATH)"
+          & "$(MAVEN_PATH)" -v
+        }
+      displayName: "Detect Maven (mvnw vs mvn)"
+
+    # Build + Tests con reporte JUnit. Forzamos el repo local para que se cachee.
+    - task: Maven@3
+      displayName: "mvn clean verify"
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'clean verify'
+        options: '-Dmaven.repo.local=$(MAVEN_LOCAL_REPO) -U'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        codeCoverageToolOption: 'None'   # cambia a JaCoCo si ya lo tienes configurado
+        mavenOptions: '-Xmx1g -DskipTests=false'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '$(JDK_VERSION)'  # requiere JDK preinstalado en el agente
+        jdkArchitectureOption: 'x64'
+        # Si NO usas mvnw y necesitas forzar la ruta de mvn:
+        mavenVersionOption: 'Path'
+        mavenPath: '$(MAVEN_PATH)'
+
+    # Publica artefactos generados (ajusta patrón si empaquetas WAR/EAR)
+    - task: PublishBuildArtifacts@1
+      displayName: "Publish artifact(s)"
+      inputs:
+        pathToPublish: '$(System.DefaultWorkingDirectory)/**/target/*.jar'
+        artifactName: 'maven-drop'
+        publishLocation: 'Container'
