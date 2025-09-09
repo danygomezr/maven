@@ -11,7 +11,7 @@ variables:
   # Ajusta si necesitas otra versión de JDK preinstalada en tu agente
   JDK_VERSION: '1.17'
   # Si NO usas mvnw y tienes Maven instalado localmente, define la ruta:
-  MAVEN_PATH: '/usr/share/maven/bin/mvn'   # ej. Linux
+  MAVEN_PATH: '/usr/local/bin/mvn'   # ej. Linux
   # Repositorio Maven cacheado en el workspace para usar con Cache@2
   MAVEN_LOCAL_REPO: '$(Pipeline.Workspace)/.m2/repository'
 
