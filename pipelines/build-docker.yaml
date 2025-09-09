@@ -35,8 +35,9 @@ stages:
         esac
 
         # ----- Instalar Temurin JDK 17 (user-space) -----
-        JDK_TGZ="OpenJDK17U-jdk_${JDK_ARCH}_linux_hotspot.tar.gz"
-        JDK_URL="https://github.com/adoptium/temurin17-binaries/releases/latest/download/${JDK_TGZ}"
+        JDK_TGZ="OpenJDK17U-jdk_x64_linux_hotspot_17.0.16_8.tar.gz"
+        JDK_URL="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.16%2B8/OpenJDK17U-jdk_x64_linux_hotspot_17.0.16_8.tar.gz"
+                  
         echo "Descargando JDK: $JDK_URL"
         curl -fsSL "$JDK_URL" -o "$JDK_TGZ"
         tar -xzf "$JDK_TGZ"
