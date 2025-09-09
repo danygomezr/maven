@@ -1,7 +1,57 @@
+# .azure-pipelines/pipelines/maven-build-container.yml
 name: $(Date:yyyyMMdd)$(Rev:.r)
 
 trigger:
-  branches: { include: [ main, task/*] }
+  branches: { include: [ main, task/* ] }
 
 pool:
-  name: Local-ENV
+  name: Local-ENV   # con Docker disponible
+
+stages:
+- stage: Build
+  jobs:
+  - job: build_in_container
+    displayName: Build in Maven container
+    container: maven:3.9.6-eclipse-temurin-17
+    variables:
+      MAVEN_LOCAL_REPO: '/root/.m2/repository'
+    steps:
+    - checkout: self
+      clean: true
+
+    - bash: mvn -v && java -version
+      displayName: "Tooling check"
+
+    - bash: |
+        set -euo pipefail
+        mvn -Dmaven.repo.local="$(MAVEN_LOCAL_REPO)" -U -B -e clean verify
+      displayName: "mvn clean verify"
+      env:
+        MAVEN_OPTS: "-Xmx1g"
+
+    - task: PublishTestResults@2
+      displayName: "Publish JUnit"
+      condition: always()
+      inputs:
+        testResultsFormat: 'JUnit'
+        searchFolder: '$(System.DefaultWorkingDirectory)'
+        testResultsFiles: |
+          **/test-results-surefire/TEST-*.xml
+          **/surefire-reports/TEST-*.xml
+          **/failsafe-reports/TEST-*.xml
+        mergeTestResults: true
+        failTaskOnFailedTests: false
+
+    - task: CopyFiles@2
+      displayName: "Stage JARs"
+      inputs:
+        SourceFolder: '$(System.DefaultWorkingDirectory)'
+        Contents: '**/target/*.jar'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+        flattenFolders: true
+
+    - task: PublishPipelineArtifact@1
+      displayName: "Publish artifact(s)"
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'maven-drop'
