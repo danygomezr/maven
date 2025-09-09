@@ -2,11 +2,10 @@
 name: $(Date:yyyyMMdd)$(Rev:.r)
 
 trigger:
-  branches: { include: [ main, develop ] }
-  paths:    { include: [ pom.xml, **/*.java, .azure-pipelines/** ] }
+  branches: { include: [ main, task/*] }
 
 pool:
-  name: Local-ENV   # <- tu agente self-hosted
+  name: Local-ENV
 
 variables:
   # Ajusta si necesitas otra versión de JDK preinstalada en tu agente
