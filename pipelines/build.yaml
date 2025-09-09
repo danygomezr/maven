@@ -69,7 +69,7 @@ stages:
         jdkArchitectureOption: 'x64'
         # Si NO usas mvnw y necesitas forzar la ruta de mvn:
         mavenVersionOption: 'Path'
-        mavenPath: '$(MAVEN_PATH)'
+        mavenDirectory: '/usr/local/opt/maven/libexec'
 
     # Publica artefactos generados (ajusta patrón si empaquetas WAR/EAR)
     - task: PublishBuildArtifacts@1
