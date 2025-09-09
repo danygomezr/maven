@@ -5,19 +5,41 @@ trigger:
   branches: { include: [ main, task/* ] }
 
 pool:
-  name: Local-ENV   # con Docker disponible
+  name: Local-ENV   # agente con Docker, SIN Maven
 
 stages:
 - stage: Build
   jobs:
   - job: build_in_container
-    displayName: Build in Maven container
-    container: maven:3.9.6-eclipse-temurin-17
+    displayName: Build in Maven + Node (container)
+    container:
+      image: maven:3.9.9-eclipse-temurin-17
+      # Forzamos shell como entrypoint para que no ejecute "node" al arrancar
+      options: '--entrypoint /bin/bash'
     variables:
       MAVEN_LOCAL_REPO: '/root/.m2/repository'
+
     steps:
     - checkout: self
       clean: true
+
+    # Instalar Node 20 dentro del contenedor (Debian/Bookworm)
+    - bash: |
+        set -euo pipefail
+        apt-get update
+        apt-get install -y curl ca-certificates gnupg
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt-get install -y nodejs
+        node -v && npm -v
+      displayName: "Install Node 20 in container"
+
+    # (Opcional) Cache de dependencias Maven dentro del contenedor
+    - task: Cache@2
+      displayName: "Cache .m2"
+      inputs:
+        key: 'maven | "$(Agent.OS)" | **/pom.xml'
+        restoreKeys: 'maven | "$(Agent.OS)"'
+        path: '$(MAVEN_LOCAL_REPO)'
 
     - bash: mvn -v && java -version
       displayName: "Tooling check"
@@ -28,6 +50,16 @@ stages:
       displayName: "mvn clean verify"
       env:
         MAVEN_OPTS: "-Xmx1g"
+
+    # Diagnóstico (por si los reports van a otra carpeta)
+    - bash: |
+        set +e
+        echo "Total TEST-*.xml:"
+        find "$(System.DefaultWorkingDirectory)" -type f -name "TEST-*.xml" | wc -l || true
+        echo "Ejemplos:"
+        find "$(System.DefaultWorkingDirectory)" -type f -name "TEST-*.xml" | head -n 20 || true
+      displayName: "Diagnóstico: localizar reportes JUnit"
+      condition: always()
 
     - task: PublishTestResults@2
       displayName: "Publish JUnit"
