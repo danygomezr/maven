@@ -11,33 +11,68 @@ stages:
 - stage: Build
   jobs:
   - job: build_in_node_container
-    displayName: Build in Node container (install JDK+Maven)
+    displayName: Build in Node container (user-space JDK+Maven)
     container:
-      image: node:20-bookworm
-      options: '--user 0'       # 👈 ejecuta como root para apt-get
+      image: node:20-bookworm   # Node ya viene; ADO mantiene vivo el contenedor
     variables:
-      MAVEN_LOCAL_REPO: '/root/.m2/repository'
+      MAVEN_LOCAL_REPO: '/home/node/.m2/repository'
 
     steps:
     - checkout: self
       clean: true
 
-    # Verifica usuario efectivo (debe ser uid=0)
-    - bash: id -u && whoami
-      displayName: "Check user (should be root)"
-
-    # Instalar JDK 17 + Maven dentro del contenedor
+    # Instalar JDK 17 + Maven en $HOME (sin root)
     - bash: |
         set -euo pipefail
-        apt-get update
-        apt-get install -y --no-install-recommends openjdk-17-jdk-headless maven ca-certificates
-        export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(which java)")")")"
+        cd "$HOME"
+
+        # Detectar arquitectura
+        ARCH="$(uname -m)"
+        case "$ARCH" in
+          x86_64)  JDK_ARCH="x64" ;;
+          aarch64) JDK_ARCH="aarch64" ;;
+          *) echo "Arquitectura no soportada: $ARCH"; exit 1 ;;
+        esac
+
+        # ----- Instalar Temurin JDK 17 (user-space) -----
+        JDK_TGZ="OpenJDK17U-jdk_${JDK_ARCH}_linux_hotspot.tar.gz"
+        JDK_URL="https://github.com/adoptium/temurin17-binaries/releases/latest/download/${JDK_TGZ}"
+        echo "Descargando JDK: $JDK_URL"
+        curl -fsSL "$JDK_URL" -o "$JDK_TGZ"
+        tar -xzf "$JDK_TGZ"
+        JDK_DIR="$(tar -tzf "$JDK_TGZ" | head -1 | cut -f1 -d'/')"
+        mv "$JDK_DIR" "$HOME/jdk-17"
+        rm -f "$JDK_TGZ"
+
+        # ----- Instalar Maven 3.9.9 (user-space) -----
+        MVN_VER="3.9.9"
+        MVN_TGZ="apache-maven-${MVN_VER}-bin.tar.gz"
+        MVN_URL="https://archive.apache.org/dist/maven/maven-3/${MVN_VER}/binaries/${MVN_TGZ}"
+        echo "Descargando Maven: $MVN_URL"
+        curl -fsSL "$MVN_URL" -o "$MVN_TGZ"
+        tar -xzf "$MVN_TGZ"
+        mv "apache-maven-${MVN_VER}" "$HOME/maven"
+        rm -f "$MVN_TGZ"
+
+        # Exportar a este y siguientes pasos
+        echo "##vso[task.setvariable variable=JAVA_HOME]$HOME/jdk-17"
+        echo "##vso[task.setvariable variable=M2_HOME]$HOME/maven"
+        echo 'export JAVA_HOME="$HOME/jdk-17"' >> "$BASH_ENV"
+        echo 'export M2_HOME="$HOME/maven"'   >> "$BASH_ENV"
+        echo 'export PATH="$JAVA_HOME/bin:$M2_HOME/bin:$PATH"' >> "$BASH_ENV"
+      displayName: "Install JDK 17 + Maven (user-space)"
+
+    # Verificación de herramientas (usa env persistido en $BASH_ENV)
+    - bash: |
+        set -euo pipefail
         echo "JAVA_HOME=$JAVA_HOME"
+        echo "M2_HOME=$M2_HOME"
         java -version
         mvn -v
         node -v && npm -v
-      displayName: "Install JDK 17 + Maven"
+      displayName: "Tooling check"
 
+    # Cache .m2 (dentro de $HOME/node)
     - task: Cache@2
       displayName: "Cache .m2"
       inputs:
@@ -45,16 +80,15 @@ stages:
         restoreKeys: 'maven | "$(Agent.OS)"'
         path: '$(MAVEN_LOCAL_REPO)'
 
+    # Build + Tests
     - bash: |
         set -euo pipefail
-        export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(which java)")")")"
-        export PATH="$JAVA_HOME/bin:$PATH"
         mvn -Dmaven.repo.local="$(MAVEN_LOCAL_REPO)" -U -B -e clean verify
       displayName: "mvn clean verify"
       env:
         MAVEN_OPTS: "-Xmx1g"
 
-    # (Opcional) Diagnóstico de reports
+    # Diagnóstico de reports
     - bash: |
         set +e
         echo "Total TEST-*.xml:"
