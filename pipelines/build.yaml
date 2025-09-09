@@ -104,7 +104,7 @@ stages:
         testResultsFormat: 'JUnit'
         searchFolder: '$(System.DefaultWorkingDirectory)'
         testResultsFiles: |
-          **/TEST-*.xml
+          **/test-results-surefire/TEST-*.xml
           **/surefire-reports/TEST-*.xml
           **/failsafe-reports/TEST-*.xml
         mergeTestResults: true
