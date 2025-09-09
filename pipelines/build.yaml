@@ -95,11 +95,40 @@ stages:
           **/failsafe-reports/TEST-*.xml
         failTaskOnFailedTests: false
 
-    # Publicar artefactos generados
+    # Copiar JARs generados al staging (soporta globs y exclusiones)
+    - task: CopyFiles@2
+      displayName: "Stage artifacts (*.jar)"
+      condition: succeeded()
+      inputs:
+        SourceFolder: '$(System.DefaultWorkingDirectory)'
+        Contents: |
+          **/target/*.jar
+          !**/*-sources.jar
+          !**/*-javadoc.jar
+          !**/*-tests.jar
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+        OverWrite: true
+        flattenFolders: true
+
+    # (Opcional) Listar lo que quedó en staging para depurar
+    - bash: |
+        set -e
+        echo "Contenido en $(Build.ArtifactStagingDirectory):"
+        ls -la "$(Build.ArtifactStagingDirectory)" || true
+      displayName: "List staged artifacts"
+      condition: succeededOrFailed()
+
+    # Publicar artefactos (ahora sí, a partir de una carpeta real)
     - task: PublishBuildArtifacts@1
       displayName: "Publish artifact(s)"
       condition: succeeded()
       inputs:
-        pathToPublish: '$(System.DefaultWorkingDirectory)/**/target/*.jar'
+        pathToPublish: '$(Build.ArtifactStagingDirectory)'
         artifactName: 'maven-drop'
         publishLocation: 'Container'
+
+    #- task: PublishPipelineArtifact@1
+    #  displayName: "Publish artifact(s)"
+    #  inputs:
+    #    targetPath: '$(Build.ArtifactStagingDirectory)'
+    #    artifact: 'maven-drop'
